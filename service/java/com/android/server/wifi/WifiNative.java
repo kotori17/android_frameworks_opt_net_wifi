@@ -487,12 +487,14 @@ public class WifiNative {
      * daemon's death.
      */
     private void onNativeDaemonDeath() {
+        synchronized (mLock) {
             for (StatusListener listener : mStatusListeners) {
                 listener.onStatusChanged(false);
             }
             for (StatusListener listener : mStatusListeners) {
                 listener.onStatusChanged(true);
             }
+        }
     }
 
     /**
@@ -501,9 +503,11 @@ public class WifiNative {
     private class VendorHalDeathHandlerInternal implements VendorHalDeathEventHandler {
         @Override
         public void onDeath() {
+            synchronized (mLock) {
                 Log.i(TAG, "Vendor HAL died. Cleaning up internal state.");
                 onNativeDaemonDeath();
                 mWifiMetrics.incrementNumHalCrashes();
+            }
         }
     }
 
@@ -513,9 +517,11 @@ public class WifiNative {
     private class WificondDeathHandlerInternal implements WificondDeathEventHandler {
         @Override
         public void onDeath() {
+            synchronized (mLock) {
                 Log.i(TAG, "wificond died. Cleaning up internal state.");
                 onNativeDaemonDeath();
                 mWifiMetrics.incrementNumWificondCrashes();
+            }
         }
     }
 
@@ -525,9 +531,11 @@ public class WifiNative {
     private class SupplicantDeathHandlerInternal implements SupplicantDeathEventHandler {
         @Override
         public void onDeath() {
+            synchronized (mLock) {
                 Log.i(TAG, "wpa_supplicant died. Cleaning up internal state.");
                 onNativeDaemonDeath();
                 mWifiMetrics.incrementNumSupplicantCrashes();
+            }
         }
     }
 
@@ -537,9 +545,11 @@ public class WifiNative {
     private class HostapdDeathHandlerInternal implements HostapdDeathEventHandler {
         @Override
         public void onDeath() {
+            synchronized (mLock) {
                 Log.i(TAG, "hostapd died. Cleaning up internal state.");
                 onNativeDaemonDeath();
                 mWifiMetrics.incrementNumHostapdCrashes();
+            }
         }
     }
 
