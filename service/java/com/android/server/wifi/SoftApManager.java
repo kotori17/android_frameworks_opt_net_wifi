@@ -94,7 +94,7 @@ public class SoftApManager implements ActiveModeManager {
     private int mNumAssociatedStations = 0;
     private boolean mTimeoutEnabled = false;
     private String[] mdualApInterfaces;
-    private boolean expectedStop = false;
+    private boolean mDualSapIfacesDestroyed = false;
 
     private final SarManager mSarManager;
 
@@ -156,7 +156,6 @@ public class SoftApManager implements ActiveModeManager {
      */
     public void stop() {
         Log.d(TAG, " currentstate: " + getCurrentStateName());
-        expectedStop = true;
         if (mApInterfaceName != null) {
             if (mIfaceIsUp) {
                 updateApState(WifiManager.WIFI_AP_STATE_DISABLING,
@@ -286,7 +285,8 @@ public class SoftApManager implements ActiveModeManager {
      * Teardown soft AP and teardown the interface.
      */
     private void stopSoftAp() {
-        if (mWifiApConfigStore.getDualSapStatus()) {
+        if (mWifiApConfigStore.getDualSapStatus()  && !mDualSapIfacesDestroyed) {
+            mDualSapIfacesDestroyed = true;
             mWifiNative.teardownInterface(mdualApInterfaces[0]);
             mWifiNative.teardownInterface(mdualApInterfaces[1]);
         }
@@ -304,6 +304,9 @@ public class SoftApManager implements ActiveModeManager {
         public static final int CMD_INTERFACE_DESTROYED = 7;
         public static final int CMD_INTERFACE_DOWN = 8;
         public static final int CMD_SOFT_AP_CHANNEL_SWITCHED = 9;
+        public static final int CMD_CONNECTED_STATIONS = 10;
+        public static final int CMD_DISCONNECTED_STATIONS = 11;
+        public static final int CMD_DUAL_SAP_INTERFACE_DESTROYED = 50;
 
         private final State mIdleState = new IdleState();
         private final State mStartedState = new StartedState();
@@ -334,17 +337,7 @@ public class SoftApManager implements ActiveModeManager {
         private final InterfaceCallback mWifiNativeDualIfaceCallback = new InterfaceCallback() {
             @Override
             public void onDestroyed(String ifaceName) {
-                // one of the dual interface is destroyed by native layers. trigger full cleanup.
-                if (!expectedStop) {
-                    Log.e(TAG, "One of Dual interface ("+ifaceName+") destroyed. trigger cleanup");
-                    // Avoid cleaning the interface which is already destroyed.
-                    if (ifaceName.equals(mdualApInterfaces[0]))
-                        mdualApInterfaces[0] = "";
-                    else if (ifaceName.equals(mdualApInterfaces[1]))
-                        mdualApInterfaces[1] = "";
-
-                    stop();
-                }
+                sendMessage(CMD_DUAL_SAP_INTERFACE_DESTROYED, ifaceName);
             }
 
             @Override
@@ -613,7 +606,7 @@ public class SoftApManager implements ActiveModeManager {
                 if (mSettingObserver != null) {
                     mSettingObserver.register();
                 }
-                
+
                 mSarManager.setSapWifiState(WifiManager.WIFI_AP_STATE_ENABLED);
 
                 Log.d(TAG, "Resetting num stations on start");
@@ -723,11 +716,33 @@ public class SoftApManager implements ActiveModeManager {
                         transitionTo(mIdleState);
                         break;
                     case CMD_INTERFACE_DESTROYED:
-                        Log.d(TAG, "Interface was cleanly destroyed.");
+                        //teardown Dual SAP interfaces if required
+                        if (mWifiApConfigStore.getDualSapStatus() && !mDualSapIfacesDestroyed) {
+                            Log.d(TAG, "Bridge inteface destroyed, Teardown dual intefaces");
+                            mDualSapIfacesDestroyed = true;
+                            mWifiNative.teardownInterface(mdualApInterfaces[0]);
+                            mWifiNative.teardownInterface(mdualApInterfaces[1]);
+                        }
+                        Log.d(TAG, "Interface(s) was cleanly destroyed.");
                         updateApState(WifiManager.WIFI_AP_STATE_DISABLING,
                                 WifiManager.WIFI_AP_STATE_ENABLED, 0);
                         mApInterfaceName = null;
                         transitionTo(mIdleState);
+                        break;
+                    case CMD_DUAL_SAP_INTERFACE_DESTROYED:
+                        // one of the dual interface is destroyed by native layers. trigger full cleanup.
+                        if (!mDualSapIfacesDestroyed) {
+                            String ifaceName = (String) message.obj;
+                            Log.d(TAG, "One of Dual interface ("+ifaceName+") destroyed. trigger cleanup");
+                            // teardown other dual interface and bridge interface.
+                            mDualSapIfacesDestroyed = true;
+                            if (ifaceName.equals(mdualApInterfaces[0])) {
+                                mWifiNative.teardownInterface(mdualApInterfaces[1]);
+                            } else if (ifaceName.equals(mdualApInterfaces[1])) {
+                               mWifiNative.teardownInterface(mdualApInterfaces[0]);
+                            }
+                            mWifiNative.teardownInterface(mApInterfaceName);
+                        }
                         break;
                     case CMD_INTERFACE_DOWN:
                         Log.w(TAG, "interface error, stop and report failure");
